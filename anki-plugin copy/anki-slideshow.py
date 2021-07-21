@@ -37,7 +37,8 @@ def exportCardsToWeb():
     for deck in mw.col.decks.all():
         deckName = deck['name']
         if deckName == 'Custom Study Session': continue
-        export["decks"][deckName] = mw.col.findCards("deck:'%s'" % deckName)
+        #changed findCards to find_cards
+        export["decks"][deckName] = mw.col.find_cards("deck:'%s'" % deckName)
         
     for card in mw.col.renderQA(None, "all"):
         id = card["id"]
