@@ -8,6 +8,9 @@ from aqt.qt import *
 
 import io, json, os, subprocess
 
+from . import util
+'''this is an AnkiConnect file'''
+
 EXAMPLE_SYNC_TARGET = 'username@example.com:/path/to/anki-data'
 SYNC_CMD = ['rsync', '-rcz', '--stats']
 
@@ -23,8 +26,9 @@ def getPaths():
 def getPrevData():
     json_filename, media_path = getPaths()
     try:
-        prev_data = json.load(io.open(json_filename, 'r', encoding='utf-8'))
-    except IOError:
+        f = open(json_filename, 'r', encoding='utf-8')
+        prev_data = json.load(f)
+    except:
         prev_data = {}
     return prev_data
 
@@ -39,9 +43,53 @@ def exportCardsToWeb():
         deckName = deck['name']
         if deckName == 'Custom Study Session': continue
         #changed findCards to find_cards
-        export["decks"][deckName] = mw.col.find_cards("deck:'%s'" % deckName)
+        '''how to make card ID's show up in the deck field??????'''
+        export["decks"][deckName] = [int(cid) for cid in mw.col.find_cards("deck:'%s'" % deckName)]
         
-    for card in mw.col.renderQA(None, "all"):
+        #moved iterating up here to have program iterate through all decks
+        # New method to iterate over cards
+        for cid in mw.col.find_cards(f"deck:{deckName}"):
+            card = mw.col.getCard(cid)
+            tags = mw.col.getNote(card.nid).tags
+            # for tag in tags:
+            #     card["lec"] = tag
+
+            '''from AnkiConnect cardsInfo method'''
+            result = []
+            model = card.model()
+            note = card.note()
+            fields = {}
+            for info in model['flds']:
+                order = info['ord']
+                name = info['name']
+                fields[name] = {'value': note.fields[order], 'order': order}
+
+            result.append({
+                'cardId': card.id,
+                'fields': fields,
+                'fieldOrder': card.ord,
+                'question': util.cardQuestion(card),
+                'answer': util.cardAnswer(card),
+                'modelName': model['name'],
+                'ord': card.ord,
+                'deckName': deckName,
+                'css': model['css'],
+                'factor': card.factor,
+                #This factor is 10 times the ease percentage,
+                # so an ease of 310% would be reported as 3100
+                'interval': card.ivl,
+                'note': card.nid,
+                'type': card.type,
+                'queue': card.queue,
+                'due': card.due,
+                'reps': card.reps,
+                'lapses': card.lapses,
+                'left': card.left,
+            })
+            '''from AnkiConnect cardsInfo method'''
+
+            export["cards"][cid] = result
+    '''for card in mw.col.renderQA(None, "all"):
         id = card["id"]
         del card["id"]
         tags = mw.col.getNote(mw.col.getCard(id).nid).tags
@@ -49,32 +97,36 @@ def exportCardsToWeb():
             if tag[0:11] == "zz_lecture_":
                 card["lec"] = int(tag[11:])
         export["cards"][id] = card
-    
+    '''
+
     # If there is no sync target saved in the previous configuration, ask for it
     prev_data = getPrevData()
-    while prev_data.has_key('sync_target') is False:
+    while prev_data.get('sync_target', None) == None:
         prev_data = getSyncTarget(prev_data)
         
     export['sync_target'] = prev_data['sync_target']
         
-    with io.open(json_filename, 'w', encoding='utf-8') as f:
-        f.write(unicode(json.dumps(export, ensure_ascii=False)))
+    with open(json_filename, 'w', encoding='utf-8') as f:
+        # f.write(json.dumps(export, ensure_ascii=False))
+        json.dump(export, f, ensure_ascii=False)
     
-    err = None
+    # err = None
     if export['sync_target'] != '':
         try:
             args = SYNC_CMD + [json_filename, media_path, export['sync_target']]
             out = subprocess.check_output(' '.join(map(shellquote, args)), stderr=subprocess.STDOUT, shell=True)
+            aqt.utils.showInfo("Cards exported: %d\n\nSync results:\n%s" % (len(export["cards"]), out))
         except subprocess.CalledProcessError as err:
+            aqt.utils.showInfo("Sync command failed with code %d. Here's the output:\n%s" % (err.returncode, err.output))
             pass
     
-    # Show the results of what we've done
-    if err is not None:
-        # The sync command returned with a nonzero code
-        aqt.utils.showInfo("Sync command failed with code %d. Here's the output:\n%s" % (err.returncode, err.output))
-    else:
-        # There were no errors.
-        aqt.utils.showInfo("Cards exported: %d\n\nSync results:\n%s" % (len(export["cards"]), out))
+    # # Show the results of what we've done
+    # if err is not None:
+    #     # The sync command returned with a nonzero code
+    #     aqt.utils.showInfo("Sync command failed with code %d. Here's the output:\n%s" % (err.returncode, err.output))
+    # else:
+    #     # There were no errors.
+    #     aqt.utils.showInfo("Cards exported: %d\n\nSync results:\n%s" % (len(export["cards"]), out))
         
 def getSyncTarget(prev_data = None):
     json_filename, media_path = getPaths()
@@ -103,7 +155,7 @@ to this destination, and if it is remote, set up SSH keys so that a password is 
     else:
         # The export will not write this to disk, we have to do it ourselves
         with io.open(json_filename, 'w', encoding='utf-8') as f:
-            f.write(unicode(json.dumps(prev_data, ensure_ascii=False)))
+            f.write(json.dumps(prev_data, ensure_ascii=False).encode("utf-8"))
 
 # create new menu items for both of those functions and add them to the Tools menu
 mw.form.menuTools.addSeparator()
